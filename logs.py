@@ -1,110 +1,352 @@
-# Dev-only log dataset. Not deployed to Lambda.
-# Covers all five event types across clean and suspicious contexts.
+# Dev-only CloudTrail log dataset. Not deployed to Lambda.
+# Follows the real CloudTrail JSON schema.
+# Geographic location is not present in CloudTrail — it requires GeoIP enrichment on sourceIPAddress.
+# failed_attempts is not present in a single event — it requires cross-event aggregation.
 
 LOGS = [
-    # --- ConsoleLogin: failed brute-force, off-hours, no MFA, unusual location ---
+    # --- alice: ConsoleLogin failure, off-hours (02:13 UTC), no MFA, malicious IP ---
     {
-        "user":            "alice",
-        "event":           "ConsoleLogin",
-        "source_ip":       "203.0.113.5",   # malicious stub IP
-        "time":            "02:13",
-        "success":         False,
-        "location":        "Russia",
-        "mfa_used":        False,
-        "failed_attempts": 7,
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "IAMUser",
+            "principalId": "AIDAEXAMPLE00001",
+            "arn": "arn:aws:iam::111122223333:user/alice",
+            "accountId": "111122223333",
+            "userName": "alice",
+        },
+        "eventTime": "2024-01-15T02:13:00Z",
+        "eventSource": "signin.amazonaws.com",
+        "eventName": "ConsoleLogin",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "203.0.113.5",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "additionalEventData": {
+            "MFAUsed": "No",
+            "LoginTo": "https://console.aws.amazon.com/",
+            "MobileVersion": "No",
+        },
+        "responseElements": {"ConsoleLogin": "Failure"},
+        "errorMessage": "Failed authentication",
+        "requestID": "aaaaaaaa-0001-0001-0001-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0001-0001-0001-bbbbbbbbbbbb",
+        "eventType": "AwsConsoleSignIn",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
-    # --- ConsoleLogin: clean login ---
+
+    # --- bob: clean ConsoleLogin, business hours, MFA used ---
     {
-        "user":            "bob",
-        "event":           "ConsoleLogin",
-        "source_ip":       "10.1.2.3",
-        "time":            "09:45",
-        "success":         True,
-        "location":        "USA",
-        "mfa_used":        True,
-        "failed_attempts": 0,
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "IAMUser",
+            "principalId": "AIDAEXAMPLE00002",
+            "arn": "arn:aws:iam::111122223333:user/bob",
+            "accountId": "111122223333",
+            "userName": "bob",
+        },
+        "eventTime": "2024-01-15T09:45:00Z",
+        "eventSource": "signin.amazonaws.com",
+        "eventName": "ConsoleLogin",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "10.1.2.3",
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "additionalEventData": {
+            "MFAUsed": "Yes",
+            "LoginTo": "https://console.aws.amazon.com/",
+            "MobileVersion": "No",
+        },
+        "responseElements": {"ConsoleLogin": "Success"},
+        "requestID": "aaaaaaaa-0002-0002-0002-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0002-0002-0002-bbbbbbbbbbbb",
+        "eventType": "AwsConsoleSignIn",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
-    # --- AssumeRole: successful, known location ---
+
+    # --- carol: AssumeRole, business hours, MFA-backed session ---
     {
-        "user":            "carol",
-        "event":           "AssumeRole",
-        "source_ip":       "10.0.1.50",
-        "time":            "14:22",
-        "success":         True,
-        "location":        "USA",
-        "mfa_used":        True,
-        "failed_attempts": 0,
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "IAMUser",
+            "principalId": "AIDAEXAMPLE00003",
+            "arn": "arn:aws:iam::111122223333:user/carol",
+            "accountId": "111122223333",
+            "userName": "carol",
+            "sessionContext": {
+                "attributes": {
+                    "mfaAuthenticated": "true",
+                    "creationDate": "2024-01-15T14:00:00Z",
+                },
+            },
+        },
+        "eventTime": "2024-01-15T14:22:00Z",
+        "eventSource": "sts.amazonaws.com",
+        "eventName": "AssumeRole",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "10.0.1.50",
+        "userAgent": "aws-cli/2.13.0 Python/3.11.0",
+        "requestParameters": {
+            "roleArn": "arn:aws:iam::111122223333:role/developer",
+            "roleSessionName": "carol-session",
+        },
+        "responseElements": {
+            "credentials": {
+                "accessKeyId": "ASIAEXAMPLE00003",
+                "expiration": "Jan 15, 2024, 10:22:00 PM",
+            },
+        },
+        "requestID": "aaaaaaaa-0003-0003-0003-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0003-0003-0003-bbbbbbbbbbbb",
+        "readOnly": False,
+        "eventType": "AwsApiCall",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
-    # --- GetSecretValue: borderline IP, MFA unknown ---
+
+    # --- dave: GetSecretValue, MFA status unknown (no sessionContext attributes) ---
     {
-        "user":            "dave",
-        "event":           "GetSecretValue",
-        "source_ip":       "198.51.100.77",
-        "time":            "11:05",
-        "success":         True,
-        "location":        "USA",
-        # mfa_used intentionally omitted → defaults to None
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "IAMUser",
+            "principalId": "AIDAEXAMPLE00004",
+            "arn": "arn:aws:iam::111122223333:user/dave",
+            "accountId": "111122223333",
+            "userName": "dave",
+        },
+        "eventTime": "2024-01-15T11:05:00Z",
+        "eventSource": "secretsmanager.amazonaws.com",
+        "eventName": "GetSecretValue",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "198.51.100.77",
+        "userAgent": "aws-sdk-python/1.29.0",
+        "requestParameters": {"secretId": "prod/db/password"},
+        "responseElements": None,
+        "requestID": "aaaaaaaa-0004-0004-0004-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0004-0004-0004-bbbbbbbbbbbb",
+        "readOnly": True,
+        "eventType": "AwsApiCall",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
-    # --- GetSecretValue: off-hours, unusual location ---
+
+    # --- eve: GetSecretValue, off-hours (23:47 UTC), malicious IP, no MFA ---
     {
-        "user":            "eve",
-        "event":           "GetSecretValue",
-        "source_ip":       "10.0.0.99",    # malicious stub IP
-        "time":            "23:47",
-        "success":         True,
-        "location":        "China",
-        "mfa_used":        False,
-        "failed_attempts": 0,
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "AssumedRole",
+            "principalId": "AROAEXAMPLE00005:eve-session",
+            "arn": "arn:aws:sts::111122223333:assumed-role/ops-role/eve-session",
+            "accountId": "111122223333",
+            "accessKeyId": "ASIAEXAMPLE00005",
+            "sessionContext": {
+                "attributes": {
+                    "mfaAuthenticated": "false",
+                    "creationDate": "2024-01-15T23:40:00Z",
+                },
+                "sessionIssuer": {
+                    "type": "Role",
+                    "principalId": "AROAEXAMPLE00005",
+                    "arn": "arn:aws:iam::111122223333:role/ops-role",
+                    "accountId": "111122223333",
+                    "userName": "eve",
+                },
+            },
+        },
+        "eventTime": "2024-01-15T23:47:00Z",
+        "eventSource": "secretsmanager.amazonaws.com",
+        "eventName": "GetSecretValue",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "10.0.0.99",
+        "userAgent": "aws-cli/2.13.0",
+        "requestParameters": {"secretId": "prod/api/key"},
+        "responseElements": None,
+        "requestID": "aaaaaaaa-0005-0005-0005-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0005-0005-0005-bbbbbbbbbbbb",
+        "readOnly": True,
+        "eventType": "AwsApiCall",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
-    # --- CreateUser: after-hours, unusual location ---
+
+    # --- frank: CreateUser, off-hours (03:30 UTC), no MFA ---
     {
-        "user":            "frank",
-        "event":           "CreateUser",
-        "source_ip":       "172.16.0.5",
-        "time":            "03:30",
-        "success":         True,
-        "location":        "Brazil",
-        "mfa_used":        False,
-        "failed_attempts": 0,
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "IAMUser",
+            "principalId": "AIDAEXAMPLE00006",
+            "arn": "arn:aws:iam::111122223333:user/frank",
+            "accountId": "111122223333",
+            "userName": "frank",
+            "sessionContext": {
+                "attributes": {
+                    "mfaAuthenticated": "false",
+                    "creationDate": "2024-01-15T03:25:00Z",
+                },
+            },
+        },
+        "eventTime": "2024-01-15T03:30:00Z",
+        "eventSource": "iam.amazonaws.com",
+        "eventName": "CreateUser",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "172.16.0.5",
+        "userAgent": "aws-cli/2.13.0",
+        "requestParameters": {"userName": "svc-backdoor"},
+        "responseElements": {
+            "user": {
+                "userName": "svc-backdoor",
+                "arn": "arn:aws:iam::111122223333:user/svc-backdoor",
+                "createDate": "Jan 15, 2024, 3:30:00 AM",
+            },
+        },
+        "requestID": "aaaaaaaa-0006-0006-0006-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0006-0006-0006-bbbbbbbbbbbb",
+        "readOnly": False,
+        "eventType": "AwsApiCall",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
-    # --- AttachUserPolicy: follows CreateUser pattern, suspicious ---
+
+    # --- frank: AttachUserPolicy 1 minute later — privilege escalation pattern ---
     {
-        "user":            "frank",
-        "event":           "AttachUserPolicy",
-        "source_ip":       "172.16.0.5",
-        "time":            "03:31",
-        "success":         True,
-        "location":        "Brazil",
-        "mfa_used":        False,
-        "failed_attempts": 0,
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "IAMUser",
+            "principalId": "AIDAEXAMPLE00006",
+            "arn": "arn:aws:iam::111122223333:user/frank",
+            "accountId": "111122223333",
+            "userName": "frank",
+            "sessionContext": {
+                "attributes": {
+                    "mfaAuthenticated": "false",
+                    "creationDate": "2024-01-15T03:25:00Z",
+                },
+            },
+        },
+        "eventTime": "2024-01-15T03:31:00Z",
+        "eventSource": "iam.amazonaws.com",
+        "eventName": "AttachUserPolicy",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "172.16.0.5",
+        "userAgent": "aws-cli/2.13.0",
+        "requestParameters": {
+            "userName": "svc-backdoor",
+            "policyArn": "arn:aws:iam::aws:policy/AdministratorAccess",
+        },
+        "responseElements": None,
+        "requestID": "aaaaaaaa-0007-0007-0007-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0007-0007-0007-bbbbbbbbbbbb",
+        "readOnly": False,
+        "eventType": "AwsApiCall",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
-    # --- DeleteTrail: high-severity defense evasion ---
+
+    # --- grace: DeleteTrail (defense evasion), malicious IP, MFA unknown ---
     {
-        "user":            "grace",
-        "event":           "DeleteTrail",
-        "source_ip":       "192.168.100.1",  # malicious stub IP
-        "time":            "04:00",
-        "success":         True,
-        "location":        "Unknown",
-        "mfa_used":        None,
-        "failed_attempts": 0,
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "AssumedRole",
+            "principalId": "AROAEXAMPLE00008:grace-session",
+            "arn": "arn:aws:sts::111122223333:assumed-role/admin-role/grace-session",
+            "accountId": "111122223333",
+            "accessKeyId": "ASIAEXAMPLE00008",
+            "sessionContext": {
+                "attributes": {
+                    "mfaAuthenticated": "false",
+                    "creationDate": "2024-01-15T04:00:00Z",
+                },
+                "sessionIssuer": {
+                    "type": "Role",
+                    "principalId": "AROAEXAMPLE00008",
+                    "arn": "arn:aws:iam::111122223333:role/admin-role",
+                    "accountId": "111122223333",
+                    "userName": "grace",
+                },
+            },
+        },
+        "eventTime": "2024-01-15T04:00:00Z",
+        "eventSource": "cloudtrail.amazonaws.com",
+        "eventName": "DeleteTrail",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "192.168.100.1",
+        "userAgent": "aws-cli/2.13.0",
+        "requestParameters": {
+            "name": "arn:aws:cloudtrail:us-east-1:111122223333:trail/management-events",
+        },
+        "responseElements": None,
+        "requestID": "aaaaaaaa-0008-0008-0008-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0008-0008-0008-bbbbbbbbbbbb",
+        "readOnly": False,
+        "eventType": "AwsApiCall",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
-    # --- AssumeRole: missing time field (triggers normalize_time → None) ---
+
+    # --- henry: AssumeRole with a malformed eventTime (tests normalize_time fallback) ---
     {
-        "user":            "henry",
-        "event":           "AssumeRole",
-        "source_ip":       "10.2.3.4",
-        "time":            "not-a-time",
-        "success":         True,
-        "location":        "USA",
-        "mfa_used":        True,
-        "failed_attempts": 0,
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "IAMUser",
+            "principalId": "AIDAEXAMPLE00009",
+            "arn": "arn:aws:iam::111122223333:user/henry",
+            "accountId": "111122223333",
+            "userName": "henry",
+            "sessionContext": {
+                "attributes": {
+                    "mfaAuthenticated": "true",
+                    "creationDate": "2024-01-15T10:00:00Z",
+                },
+            },
+        },
+        "eventTime": "not-a-timestamp",
+        "eventSource": "sts.amazonaws.com",
+        "eventName": "AssumeRole",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "10.2.3.4",
+        "userAgent": "aws-cli/2.13.0",
+        "requestParameters": {
+            "roleArn": "arn:aws:iam::111122223333:role/readonly",
+            "roleSessionName": "henry-session",
+        },
+        "responseElements": {
+            "credentials": {
+                "accessKeyId": "ASIAEXAMPLE00009",
+                "expiration": "Jan 15, 2024, 6:00:00 PM",
+            },
+        },
+        "requestID": "aaaaaaaa-0009-0009-0009-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0009-0009-0009-bbbbbbbbbbbb",
+        "readOnly": False,
+        "eventType": "AwsApiCall",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
-    # --- ConsoleLogin: clean, minimal fields (tests optional-field defaults) ---
+
+    # --- iris: ConsoleLogin, minimal userIdentity (tests fallback user extraction) ---
     {
-        "user":      "iris",
-        "event":     "ConsoleLogin",
-        "source_ip": "10.10.10.10",
-        "time":      "10:00",
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "IAMUser",
+            "principalId": "AIDAEXAMPLE00010",
+            "arn": "arn:aws:iam::111122223333:user/iris",
+            "accountId": "111122223333",
+            "userName": "iris",
+        },
+        "eventTime": "2024-01-15T10:00:00Z",
+        "eventSource": "signin.amazonaws.com",
+        "eventName": "ConsoleLogin",
+        "awsRegion": "us-east-1",
+        "sourceIPAddress": "10.10.10.10",
+        "userAgent": "Mozilla/5.0",
+        "additionalEventData": {
+            "LoginTo": "https://console.aws.amazon.com/",
+            "MobileVersion": "No",
+        },
+        "responseElements": {"ConsoleLogin": "Success"},
+        "requestID": "aaaaaaaa-0010-0010-0010-aaaaaaaaaaaa",
+        "eventID": "bbbbbbbb-0010-0010-0010-bbbbbbbbbbbb",
+        "eventType": "AwsConsoleSignIn",
+        "managementEvent": True,
+        "eventCategory": "Management",
     },
 ]

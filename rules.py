@@ -17,7 +17,7 @@ def normalize_time(time_str):
     """Parse a time string to an integer hour (0–23). Returns None on failure."""
     if not time_str:
         return None
-    for fmt in ["%H:%M", "%H:%M:%S", "%I:%M %p"]:
+    for fmt in ["%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ", "%H:%M", "%H:%M:%S", "%I:%M %p"]:
         try:
             return datetime.strptime(time_str, fmt).hour
         except ValueError:

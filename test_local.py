@@ -274,87 +274,173 @@ class TestAgent(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# main — validation & normalisation (no S3/Bedrock)
+# main — validation & normalisation (CloudTrail schema)
 # ---------------------------------------------------------------------------
+import main as _main
+
+def _ct_log(**kwargs):
+    """Minimal valid CloudTrail event; keyword args override defaults."""
+    base = {
+        "eventTime":       "2024-01-15T10:00:00Z",
+        "eventName":       "ConsoleLogin",
+        "sourceIPAddress": "1.2.3.4",
+        "userIdentity":    {"type": "IAMUser", "userName": "alice"},
+        "additionalEventData": {"MFAUsed": "Yes"},
+        "responseElements": {"ConsoleLogin": "Success"},
+    }
+    base.update(kwargs)
+    return base
+
+
 class TestMainValidation(unittest.TestCase):
-    def setUp(self):
-        import main as m
-        self.m = m
+    def test_valid_cloudtrail_log_passes(self):
+        self.assertTrue(_main._validate(_ct_log(), "evt-001"))
 
-    def test_valid_log_passes(self):
-        log = {"user": "a", "event": "ConsoleLogin", "source_ip": "1.2.3.4", "time": "10:00"}
-        self.assertTrue(self.m._validate(log, "test.json"))
+    def test_missing_eventTime_fails(self):
+        log = _ct_log()
+        del log["eventTime"]
+        self.assertFalse(_main._validate(log, "evt-002"))
 
-    def test_missing_required_field_fails(self):
-        log = {"user": "a", "event": "ConsoleLogin", "source_ip": "1.2.3.4"}  # no time
-        self.assertFalse(self.m._validate(log, "test.json"))
+    def test_missing_userIdentity_fails(self):
+        log = _ct_log()
+        del log["userIdentity"]
+        self.assertFalse(_main._validate(log, "evt-003"))
 
-    def test_normalise_applies_defaults(self):
-        log = {"user": "a", "event": "ConsoleLogin", "source_ip": "1.2.3.4", "time": "10:00"}
-        result = self.m._normalise(dict(log))
+    def test_normalise_extracts_user_from_iam_user(self):
+        result = _main._normalise(_ct_log())
+        self.assertEqual(result["user"], "alice")
+
+    def test_normalise_extracts_user_from_assumed_role(self):
+        log = _ct_log(userIdentity={
+            "type": "AssumedRole",
+            "principalId": "AROA:session",
+            "sessionContext": {"sessionIssuer": {"userName": "bob"}},
+        })
+        result = _main._normalise(log)
+        self.assertEqual(result["user"], "bob")
+
+    def test_normalise_mfa_from_console_login(self):
+        result = _main._normalise(_ct_log(additionalEventData={"MFAUsed": "No"}))
+        self.assertFalse(result["mfa_used"])
+
+    def test_normalise_mfa_from_session_context(self):
+        log = _ct_log()
+        log["userIdentity"] = {
+            "type": "IAMUser", "userName": "carol",
+            "sessionContext": {"attributes": {"mfaAuthenticated": "true"}},
+        }
+        del log["additionalEventData"]
+        result = _main._normalise(log)
+        self.assertTrue(result["mfa_used"])
+
+    def test_normalise_mfa_unknown_when_absent(self):
+        log = _ct_log()
+        del log["additionalEventData"]
+        result = _main._normalise(log)
         self.assertIsNone(result["mfa_used"])
-        self.assertEqual(result["location"], "Unknown")
-        self.assertEqual(result["failed_attempts"], 0)
-        self.assertIsNone(result["success"])
 
-    def test_normalise_parses_hour(self):
-        log = {"user": "a", "event": "E", "source_ip": "1.2.3.4", "time": "14:30"}
-        result = self.m._normalise(dict(log))
+    def test_normalise_success_from_console_login(self):
+        result = _main._normalise(_ct_log(responseElements={"ConsoleLogin": "Failure"}))
+        self.assertFalse(result["success"])
+
+    def test_normalise_failure_from_error_code(self):
+        log = _ct_log(errorCode="AccessDenied")
+        del log["responseElements"]
+        result = _main._normalise(log)
+        self.assertFalse(result["success"])
+
+    def test_normalise_null_response_elements(self):
+        result = _main._normalise(_ct_log(responseElements=None))
+        self.assertTrue(result["success"])
+
+    def test_normalise_iso_time_parsed_to_hour(self):
+        result = _main._normalise(_ct_log(eventTime="2024-01-15T14:30:00Z"))
         self.assertEqual(result["_hour"], 14)
 
     def test_normalise_bad_time_gives_none_hour(self):
-        log = {"user": "a", "event": "E", "source_ip": "1.2.3.4", "time": "not-a-time"}
-        result = self.m._normalise(dict(log))
+        result = _main._normalise(_ct_log(eventTime="not-a-timestamp"))
         self.assertIsNone(result["_hour"])
 
-    def test_normalise_preserves_existing_values(self):
-        log = {
-            "user": "a", "event": "E", "source_ip": "1.2.3.4", "time": "10:00",
-            "mfa_used": True, "location": "USA", "failed_attempts": 3,
-        }
-        result = self.m._normalise(dict(log))
-        self.assertTrue(result["mfa_used"])
-        self.assertEqual(result["location"], "USA")
-        self.assertEqual(result["failed_attempts"], 3)
+    def test_normalise_location_always_unknown(self):
+        result = _main._normalise(_ct_log())
+        self.assertEqual(result["location"], "Unknown")
+
+    def test_normalise_preserves_original_cloudtrail_fields(self):
+        result = _main._normalise(_ct_log())
+        self.assertIn("eventName", result)
+        self.assertIn("userIdentity", result)
 
 
 # ---------------------------------------------------------------------------
-# Integration: score all entries from logs.py
+# main — run() with zero events
+# ---------------------------------------------------------------------------
+class TestRunEmpty(unittest.TestCase):
+    @patch("main.fetch_events", return_value=[])
+    @patch("main.classify_risk")
+    @patch("agent.invoke")
+    def test_zero_events_returns_empty_report(self, _inv, _lex, _fetch):
+        report = _main.run()
+        self.assertEqual(report["logs_processed"], 0)
+        self.assertEqual(report["logs_failed"], 0)
+        self.assertEqual(report["results"], [])
+        self.assertIn("run_timestamp", report)
+
+    @patch("main.fetch_events", return_value=[])
+    @patch("main._send_alert")
+    def test_zero_events_no_alert_sent(self, mock_alert, _fetch):
+        _main.run()
+        mock_alert.assert_not_called()
+
+    @patch("main.fetch_events", side_effect=__import__("cloudtrail_client").CloudTrailFetchError("network error"))
+    def test_fetch_error_returns_error_report(self, _fetch):
+        report = _main.run()
+        self.assertIn("error", report)
+        self.assertEqual(report["logs_processed"], 0)
+
+
+# ---------------------------------------------------------------------------
+# Integration: normalise + score all entries from logs.py
 # ---------------------------------------------------------------------------
 class TestLogsDataset(unittest.TestCase):
+    def _normalised(self, raw):
+        return _main._normalise(dict(raw))
+
     def test_all_logs_score_without_error(self):
         import logs
         for entry in logs.LOGS:
-            with self.subTest(user=entry.get("user"), event=entry.get("event")):
-                log = dict(entry)
-                log["_hour"] = rules.normalize_time(log.get("time"))
+            log = self._normalised(entry)
+            with self.subTest(user=log.get("user"), event=log.get("event")):
                 score, reasons, blockers = rules.score_log(log)
                 severity = rules.classify_severity(score)
                 self.assertIn(severity, ("LOW", "MEDIUM", "HIGH"))
                 self.assertIsInstance(reasons, list)
                 self.assertIsInstance(blockers, list)
 
-    def test_alice_is_high_severity(self):
+    def test_alice_rules_score_is_medium(self):
+        # Rules score is MEDIUM because failed_attempts requires cross-event aggregation
+        # and location requires GeoIP — both are unavailable from a single CloudTrail event.
+        # Lex intent (HighRiskEvent) is what drives the HIGH classification end-to-end.
         import logs
-        alice = next(l for l in logs.LOGS if l["user"] == "alice" and l["event"] == "ConsoleLogin")
-        log = dict(alice)
-        log["_hour"] = rules.normalize_time(log["time"])
+        raw = next(l for l in logs.LOGS
+                   if l.get("userIdentity", {}).get("userName") == "alice"
+                   and l.get("eventName") == "ConsoleLogin")
+        log = self._normalised(raw)
         score, _, _ = rules.score_log(log)
-        self.assertEqual(rules.classify_severity(score), "HIGH")
+        self.assertEqual(rules.classify_severity(score), "MEDIUM")
 
     def test_bob_is_low_severity(self):
         import logs
-        bob = next(l for l in logs.LOGS if l["user"] == "bob")
-        log = dict(bob)
-        log["_hour"] = rules.normalize_time(log["time"])
+        raw = next(l for l in logs.LOGS
+                   if l.get("userIdentity", {}).get("userName") == "bob")
+        log = self._normalised(raw)
         score, _, _ = rules.score_log(log)
         self.assertEqual(rules.classify_severity(score), "LOW")
 
     def test_grace_delete_trail_is_high(self):
+        # Grace uses AssumedRole — userName is in sessionContext.sessionIssuer
         import logs
-        grace = next(l for l in logs.LOGS if l["user"] == "grace")
-        log = dict(grace)
-        log["_hour"] = rules.normalize_time(log["time"])
+        raw = next(l for l in logs.LOGS if l.get("eventName") == "DeleteTrail")
+        log = self._normalised(raw)
         score, _, _ = rules.score_log(log)
         self.assertEqual(rules.classify_severity(score), "HIGH")
 
